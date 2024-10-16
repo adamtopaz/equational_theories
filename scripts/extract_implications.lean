@@ -147,14 +147,9 @@ def Implication.asLaw (v : Implication) : CoreM (Law.MagmaLaw Name × Law.MagmaL
   let rhs ← getEquationAsLaw v.rhs
   return ⟨lhs, rhs⟩
 
-inductive FreeMagma.Token (α : Type) where
-  | of : α → Token α
-  | mul : Token α
-deriving ToJson
-
-def FreeMagma.tokenize {α : Type} : FreeMagma α → Array (Token α)
-  | .Leaf x => #[.of x]
-  | .Fork x y => #[.mul] ++ x.tokenize ++ y.tokenize
+def FreeMagma.tokenize {α : Type} [ToString α] : FreeMagma α → Array String
+  | .Leaf x => #[s!"{x}"]
+  | .Fork x y => #["mul"] ++ x.tokenize ++ y.tokenize
 
 def Implication.tokenize (v : Implication) : CoreM Json := do
   let ⟨⟨hyplhs,hyprhs⟩,⟨conclhs,concrhs⟩⟩ ← v.asLaw
