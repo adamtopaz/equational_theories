@@ -38,6 +38,31 @@ def randomFreeMagmaTermWithLenDist (vars : String) (lenDist : RandT IO Nat) :
   let len ← lenDist
   randomFreeMagmaTerm' vars (max len 1)
 
+def randomMagmaLaw' (vars : String) (lhsLen rhsLen : Nat) : RandT IO (Law.MagmaLaw Name) := do
+  let lhs ← randomFreeMagmaTerm' vars lhsLen
+  let rhs ← randomFreeMagmaTerm' vars rhsLen
+  return ⟨lhs, rhs⟩
+
+def randomMagmaLaw (vars : String) (minLen maxLen : Nat) : RandT IO (Law.MagmaLaw Name) := do
+  let a := min minLen maxLen
+  let b := max minLen maxLen
+  have h : a <= b := by omega
+  let ⟨lhsLen, _, _⟩ ← Random.randBound Nat a b h
+  let ⟨rhsLen, _, _⟩ ← Random.randBound Nat a b h
+  randomMagmaLaw' vars lhsLen rhsLen
+
+def randomMagmaLawWithLenDist (vars : String) (lenDist : RandT IO Nat) : 
+    RandT IO (Law.MagmaLaw Name) := do
+  let lhsLen ← lenDist
+  let rhsLen ← lenDist
+  randomMagmaLaw' vars lhsLen rhsLen
+
+def randomMagmaLawWithLenDists (vars : String) (lhsDist rhsDist : RandT IO Nat) : 
+    RandT IO (Law.MagmaLaw Name) := do
+  let lhsLen ← lhsDist
+  let rhsLen ← rhsDist
+  randomMagmaLaw' vars lhsLen rhsLen
+
 partial
 def getEquationAsLaw (eqn : String) : CoreM (Law.MagmaLaw Name) := Meta.MetaM.run' do
   let env ← getEnv
@@ -60,24 +85,61 @@ def FreeMagma.tokenize {α : Type} [ToString α] : FreeMagma α → Array String
   | .Leaf x => #[s!"{x}"]
   | .Fork x y => #["mul"] ++ x.tokenize ++ y.tokenize
 
+def Law.MagmaLaw.tokenize {α : Type} [ToString α] (law : Law.MagmaLaw α) : Json := 
+  .mkObj [
+    ("lhs", toJson law.lhs.tokenize), 
+    ("rhs", toJson law.rhs.tokenize)
+  ] 
+
+def Law.MagmaLaw.tokenizeWithName {α : Type} [ToString α] (law : Law.MagmaLaw α) (name : String) : 
+    Json := 
+  .mkObj [
+    ("name", name),
+    ("lhs", toJson law.lhs.tokenize), 
+    ("rhs", toJson law.rhs.tokenize)
+  ] 
+
 def runTokenizeEquations (_inp : Cli.Parsed) : IO UInt32 := do
   searchPathRef.set compile_time_search_path%
   CoreM.withImportModules #[`equational_theories] do 
   for i in [:5000] do
     let eqNm := s!"Equation{i}"
     let law ← try getEquationAsLaw eqNm catch _ => continue
-    println! Json.compress <| 
-      .mkObj [
-        ("name", eqNm), 
-        ("lhs", toJson law.lhs.tokenize), 
-        ("rhs", toJson law.rhs.tokenize)
-      ]
+    println! Json.compress <| law.tokenizeWithName eqNm
   return 0
 
-def tokenizedData : Cmd := `[Cli|
-  tokenized_data VIA runTokenizeEquations;
+def tokenizeEquations : Cmd := `[Cli|
+  equations VIA runTokenizeEquations;
   "Print tokenized equations."
 ]
 
+def runGenerateEquations (inp : Cli.Parsed) : IO UInt32 := do
+  let vars := inp.positionalArg! "vars" |>.as! String
+  let num := inp.positionalArg! "num" |>.as! Nat
+  let minLen := inp.positionalArg! "minLen" |>.as! Nat
+  let maxLen := inp.positionalArg! "maxLen" |>.as! Nat
+  for _ in [:num] do
+    let law ← IO.runRand <| randomMagmaLaw vars minLen maxLen
+    println! Json.compress <| law.tokenize
+  return 0
+
+def generateEquations : Cmd := `[Cli|
+  generate VIA runGenerateEquations;
+  "Generate random equations and tokenize them"
+  ARGS:
+  vars : String; "Variables to use in equations"
+  num : Nat; "Number of equations to generate"
+  minLen : Nat; "Minimum length of terms in equations"
+  maxLen : Nat; "Maximum length of terms in equations"
+]
+
+def entrypoint : Cmd := `[Cli|
+  tokenized_data NOOP;
+  "Entry point for tokenized data"
+
+  SUBCOMMANDS:
+  tokenizeEquations; generateEquations
+] 
+
 def main (args : List String) : IO UInt32 := do
-  tokenizedData.validate args
+  entrypoint.validate args
