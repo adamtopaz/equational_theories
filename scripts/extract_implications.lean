@@ -25,7 +25,7 @@ def DualityRelation.dual (rel : DualityRelation) (imp : Implication) : Option Im
   else
     none
 
-def withExtractedResults (imp : Cli.Parsed) (action : Array Entry → DualityRelation → CoreM Unit) : IO UInt32 := do
+def withExtractedResults (imp : Cli.Parsed) (action : Array Entry → DualityRelation → IO Unit) : IO UInt32 := do
   let dualityRelation ← DualityRelation.ofFile "data/duals.json"
   let mut some modules := imp.variableArgsAs? ModuleName |
     imp.printHelp
@@ -78,7 +78,7 @@ def generateUnknowns (inp : Cli.Parsed) : IO UInt32 := do
       let mut uniqueUnknowns : Array Implication := #[]
       for imp in unknowns do
         match dualityRelation.dual imp with
-          | none => show IO _ from throw $ IO.userError "No dual found"
+          | none => throw $ IO.userError "No dual found"
           | some dualImp =>
             if allUnknowns.contains dualImp then
               unless unknownsSet.contains dualImp do
