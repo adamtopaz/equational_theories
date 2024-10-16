@@ -3,6 +3,7 @@ import Batteries.Tactic.Lint.Frontend
 import Cli.Basic
 import Lean.Util.SearchPath
 import equational_theories.Closure
+import equational_theories.Equations.All
 
 open Lean Core Elab Cli
 
@@ -25,7 +26,7 @@ def DualityRelation.dual (rel : DualityRelation) (imp : Implication) : Option Im
   else
     none
 
-def withExtractedResults (imp : Cli.Parsed) (action : Array Entry → DualityRelation → IO Unit) : IO UInt32 := do
+def withExtractedResults (imp : Cli.Parsed) (action : Array Entry → DualityRelation → CoreM Unit) : IO UInt32 := do
   let dualityRelation ← DualityRelation.ofFile "data/duals.json"
   let mut some modules := imp.variableArgsAs? ModuleName |
     imp.printHelp
@@ -78,7 +79,7 @@ def generateUnknowns (inp : Cli.Parsed) : IO UInt32 := do
       let mut uniqueUnknowns : Array Implication := #[]
       for imp in unknowns do
         match dualityRelation.dual imp with
-          | none => throw $ IO.userError "No dual found"
+          | none => show IO _ from throw $ IO.userError "No dual found"
           | some dualImp =>
             if allUnknowns.contains dualImp then
               unless unknownsSet.contains dualImp do
@@ -123,6 +124,45 @@ deriving Lean.ToJson, Lean.FromJson
 
 def Implication.asJson (v : Implication) : String := s!"\{\"rhs\":\"{v.rhs}\", \"lhs\":\"{v.lhs}\"}"
 
+partial
+def getEquationAsLaw (eqn : String) : CoreM (Law.MagmaLaw Name) := Meta.MetaM.run' do
+  let env ← getEnv
+  let some c := env.find? eqn.toName | throwError "Failed to find {eqn}"
+  let some val := c.value? | throwError "Failed to find {eqn} value"
+  Meta.lambdaTelescope val fun _ body => Meta.forallTelescope body fun _ body => do
+    match_expr body with 
+    | Eq _ lhs rhs => return ⟨← mkFreeMagma lhs, ← mkFreeMagma rhs⟩
+    | _ => throwError "Failed to find {eqn} equation components"
+where mkFreeMagma expr := do
+  match_expr expr with 
+  | Magma.op _ _ lhs rhs => 
+    return .Fork (← mkFreeMagma lhs) (← mkFreeMagma rhs)
+  | _ => 
+    match expr with 
+    | .fvar id => return .Leaf (← id.getUserName)
+    | _ => throwError "Failed to find {eqn} equation components"
+
+def Implication.asLaw (v : Implication) : CoreM (Law.MagmaLaw Name × Law.MagmaLaw Name) := do
+  let lhs ← getEquationAsLaw v.lhs
+  let rhs ← getEquationAsLaw v.rhs
+  return ⟨lhs, rhs⟩
+
+inductive FreeMagma.Token (α : Type) where
+  | of : α → Token α
+  | mul : Token α
+deriving ToJson
+
+def FreeMagma.tokenize {α : Type} : FreeMagma α → Array (Token α)
+  | .Leaf x => #[.of x]
+  | .Fork x y => #[.mul] ++ x.tokenize ++ y.tokenize
+
+def Implication.tokenize (v : Implication) : CoreM Json := do
+  let ⟨⟨hyplhs,hyprhs⟩,⟨conclhs,concrhs⟩⟩ ← v.asLaw
+  return .mkObj [
+    ("hypothesis", .mkObj [("name", v.lhs), ("lhs", toJson hyplhs.tokenize),("rhs", toJson hyprhs.tokenize)]),
+    ("conclusion", .mkObj [("name", v.rhs), ("lhs", toJson conclhs.tokenize),("rhs", toJson concrhs.tokenize)]),
+  ]
+
 def Output.asJson (v : Output) : String :=
   s!"\{\"nonimplications\":[{",".intercalate (v.nonimplications.map Implication.asJson).toList}],\"implications\":[{",".intercalate (v.implications.map Implication.asJson).toList}]}"
 
@@ -165,6 +205,14 @@ def generateOutput (inp : Cli.Parsed) : IO UInt32 := do
       let implications := (rs.filter (·.isTrue)).map (·.get)
       let nonimplications := (rs.filter (!·.isTrue)).map (·.get)
       IO.println ({implications, nonimplications : Output}).asJson
+    else if inp.hasFlag "tokenize" then
+      let implications := (rs.filter (·.isTrue)).map (·.get)
+      let nonimplications := (rs.filter (!·.isTrue)).map (·.get)
+      let output : Output := ⟨implications, nonimplications⟩
+      for imp in output.implications do
+        println! Json.compress <| .mkObj [("isTrue", true), ("implication", ← imp.tokenize)]
+      for imp in output.nonimplications do
+        println! Json.compress <| .mkObj [("isTrue", false), ("implication", ← imp.tokenize)]
     else
       for edge in rs do
         if edge.isTrue then IO.println s!"{edge.lhs} → {edge.rhs}"
@@ -203,6 +251,7 @@ def extract_implications : Cmd := `[Cli|
     «conjecture»; "Include conjectures"
     closure; "Compute the transitive closure"
     json; "Output the data as JSON"
+    tokenize; "Output tokenized data"
     "only-implications"; "Only consider implications"
 
   ARGS:
