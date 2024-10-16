@@ -3,7 +3,6 @@ import Batteries.Tactic.Lint.Frontend
 import Cli.Basic
 import Lean.Util.SearchPath
 import equational_theories.Closure
-import equational_theories.Equations.All
 
 open Lean Core Elab Cli
 
@@ -124,28 +123,6 @@ deriving Lean.ToJson, Lean.FromJson
 
 def Implication.asJson (v : Implication) : String := s!"\{\"rhs\":\"{v.rhs}\", \"lhs\":\"{v.lhs}\"}"
 
-partial
-def getEquationAsLaw (eqn : String) : CoreM (Law.MagmaLaw Name) := Meta.MetaM.run' do
-  let env ← getEnv
-  let some c := env.find? eqn.toName | throwError "Failed to find {eqn}"
-  let some val := c.value? | throwError "Failed to find {eqn} value"
-  Meta.lambdaTelescope val fun _ body => Meta.forallTelescope body fun _ body => do
-    match_expr body with 
-    | Eq _ lhs rhs => return ⟨← mkFreeMagma lhs, ← mkFreeMagma rhs⟩
-    | _ => throwError "Failed to find {eqn} equation components"
-where mkFreeMagma expr := do
-  match_expr expr with 
-  | Magma.op _ _ lhs rhs => 
-    return .Fork (← mkFreeMagma lhs) (← mkFreeMagma rhs)
-  | _ => 
-    match expr with 
-    | .fvar id => return .Leaf (← id.getUserName)
-    | _ => throwError "Failed to find {eqn} equation components"
-
-def FreeMagma.tokenize {α : Type} [ToString α] : FreeMagma α → Array String
-  | .Leaf x => #[s!"{x}"]
-  | .Fork x y => #["mul"] ++ x.tokenize ++ y.tokenize
-
 def Output.asJson (v : Output) : String :=
   s!"\{\"nonimplications\":[{",".intercalate (v.nonimplications.map Implication.asJson).toList}],\"implications\":[{",".intercalate (v.implications.map Implication.asJson).toList}]}"
 
@@ -207,22 +184,6 @@ def generateRaw (inp : Cli.Parsed) : IO UInt32 := do
     let output : OutputRaw := ⟨implications, facts, unconditionals⟩
     IO.println (toJson output).pretty
 
-def runTokenizeEquations (inp : Cli.Parsed) : IO UInt32 := withExtractedResults inp fun _ _ => do
-  for i in [:5000] do
-    let eqNm := s!"Equation{i}"
-    let law ← try getEquationAsLaw eqNm catch _ => continue
-    println! Json.compress <| 
-      .mkObj [
-        ("name", eqNm), 
-        ("lhs", toJson law.lhs.tokenize), 
-        ("rhs", toJson law.rhs.tokenize)
-      ]
-
-def tokenizeEquations : Cmd := `[Cli|
-  tokenize_equations VIA runTokenizeEquations;
-  "Print tokenized equations."
-]
-
 def raw : Cmd := `[Cli|
   raw VIA generateRaw;
   "Print all equational results in JSON format for use in other scripts."
@@ -247,7 +208,7 @@ def extract_implications : Cmd := `[Cli|
   ARGS:
     ...files : Array ModuleName; "The files to extract the implications from"
 
-  SUBCOMMANDS: outcomes; unknowns; raw; tokenizeEquations
+  SUBCOMMANDS: outcomes; unknowns; raw
 ]
 
 def main (args : List String) : IO UInt32 := do

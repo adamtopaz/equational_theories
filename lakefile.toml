@@ -28,6 +28,11 @@ root = "scripts.extract_implications"
 supportInterpreter = true
 
 [[lean_exe]]
+name = "tokenized_data"
+root = "scripts.tokenized_data"
+supportInterpreter = true
+
+[[lean_exe]]
 name = "export_equations"
 root = "scripts.export_equations"
 supportInterpreter = true
