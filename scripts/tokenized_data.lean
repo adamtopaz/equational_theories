@@ -4,8 +4,39 @@ import Cli.Basic
 import Lean.Util.SearchPath
 import equational_theories.Closure
 import Mathlib.Lean.CoreM
+import Mathlib.Control.Random
 
 open Lean Cli
+
+def randomVarName (vars : String) : RandT IO Name := 
+  match h : vars.toList.length with
+  | 0 => do throw <| .userError "Empty string"
+  | n+1 => do
+    let f : Fin (n+1) ← Random.randFin
+    return vars.toList[f].toString.toName
+
+partial
+def randomFreeMagmaTerm' (vars : String) (length : Nat) : RandT IO (FreeMagma Name) := 
+  match length with
+  | 0 => do throw <| .userError "Can't generate a word of length zero"
+  | 1 => .Leaf <$> randomVarName vars 
+  | n+2 => do
+    let ⟨a, _, _⟩ ← Random.randBound Nat 1 (n+1) (Nat.le_add_left _ _)
+    let b := (n+2) - a
+    let a ← randomFreeMagmaTerm' vars a
+    let b ← randomFreeMagmaTerm' vars b
+    return .Fork a b
+
+def randomFreeMagmaTerm (vars : String) (minLen maxLen : Nat) : 
+    RandT IO (FreeMagma Name) := do
+  if minLen = 0 then throw <| .userError "Minimum length must be at least 1"
+  let ⟨a, _, _⟩ ← Random.randBound Nat (min minLen maxLen) (max minLen maxLen) (by omega)
+  randomFreeMagmaTerm' vars a
+
+def randomFreeMagmaTermWithLenDist (vars : String) (lenDist : RandT IO Nat) : 
+    RandT IO (FreeMagma Name) := do
+  let len ← lenDist
+  randomFreeMagmaTerm' vars (max len 1)
 
 partial
 def getEquationAsLaw (eqn : String) : CoreM (Law.MagmaLaw Name) := Meta.MetaM.run' do
