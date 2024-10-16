@@ -142,21 +142,9 @@ where mkFreeMagma expr := do
     | .fvar id => return .Leaf (← id.getUserName)
     | _ => throwError "Failed to find {eqn} equation components"
 
-def Implication.asLaw (v : Implication) : CoreM (Law.MagmaLaw Name × Law.MagmaLaw Name) := do
-  let lhs ← getEquationAsLaw v.lhs
-  let rhs ← getEquationAsLaw v.rhs
-  return ⟨lhs, rhs⟩
-
 def FreeMagma.tokenize {α : Type} [ToString α] : FreeMagma α → Array String
   | .Leaf x => #[s!"{x}"]
   | .Fork x y => #["mul"] ++ x.tokenize ++ y.tokenize
-
-def Implication.tokenize (v : Implication) : CoreM Json := do
-  let ⟨⟨hyplhs,hyprhs⟩,⟨conclhs,concrhs⟩⟩ ← v.asLaw
-  return .mkObj [
-    ("hypothesis", .mkObj [("name", v.lhs), ("lhs", toJson hyplhs.tokenize),("rhs", toJson hyprhs.tokenize)]),
-    ("conclusion", .mkObj [("name", v.rhs), ("lhs", toJson conclhs.tokenize),("rhs", toJson concrhs.tokenize)]),
-  ]
 
 def Output.asJson (v : Output) : String :=
   s!"\{\"nonimplications\":[{",".intercalate (v.nonimplications.map Implication.asJson).toList}],\"implications\":[{",".intercalate (v.implications.map Implication.asJson).toList}]}"
@@ -200,14 +188,6 @@ def generateOutput (inp : Cli.Parsed) : IO UInt32 := do
       let implications := (rs.filter (·.isTrue)).map (·.get)
       let nonimplications := (rs.filter (!·.isTrue)).map (·.get)
       IO.println ({implications, nonimplications : Output}).asJson
-    else if inp.hasFlag "tokenize" then
-      let implications := (rs.filter (·.isTrue)).map (·.get)
-      let nonimplications := (rs.filter (!·.isTrue)).map (·.get)
-      let output : Output := ⟨implications, nonimplications⟩
-      for imp in output.implications do
-        println! Json.compress <| .mkObj [("isTrue", true), ("implication", ← imp.tokenize)]
-      for imp in output.nonimplications do
-        println! Json.compress <| .mkObj [("isTrue", false), ("implication", ← imp.tokenize)]
     else
       for edge in rs do
         if edge.isTrue then IO.println s!"{edge.lhs} → {edge.rhs}"
@@ -226,6 +206,22 @@ def generateRaw (inp : Cli.Parsed) : IO UInt32 := do
       | .unconditional s => unconditionals := unconditionals.push s
     let output : OutputRaw := ⟨implications, facts, unconditionals⟩
     IO.println (toJson output).pretty
+
+def runTokenizeEquations (inp : Cli.Parsed) : IO UInt32 := withExtractedResults inp fun _ _ => do
+  for i in [:5000] do
+    let eqNm := s!"Equation{i}"
+    let law ← try getEquationAsLaw eqNm catch _ => continue
+    println! Json.compress <| 
+      .mkObj [
+        ("name", eqNm), 
+        ("lhs", toJson law.lhs.tokenize), 
+        ("rhs", toJson law.rhs.tokenize)
+      ]
+
+def tokenizeEquations : Cmd := `[Cli|
+  tokenize_equations VIA runTokenizeEquations;
+  "Print tokenized equations."
+]
 
 def raw : Cmd := `[Cli|
   raw VIA generateRaw;
@@ -246,13 +242,12 @@ def extract_implications : Cmd := `[Cli|
     «conjecture»; "Include conjectures"
     closure; "Compute the transitive closure"
     json; "Output the data as JSON"
-    tokenize; "Output tokenized data"
     "only-implications"; "Only consider implications"
 
   ARGS:
     ...files : Array ModuleName; "The files to extract the implications from"
 
-  SUBCOMMANDS: outcomes; unknowns; raw
+  SUBCOMMANDS: outcomes; unknowns; raw; tokenizeEquations
 ]
 
 def main (args : List String) : IO UInt32 := do
