@@ -165,6 +165,13 @@ def generateOutput (inp : Cli.Parsed) : IO UInt32 := do
       let implications := (rs.filter (·.isTrue)).map (·.get)
       let nonimplications := (rs.filter (!·.isTrue)).map (·.get)
       IO.println ({implications, nonimplications : Output}).asJson
+    else if inp.hasFlag "jsonl" then
+      let implications := (rs.filter (·.isTrue)).map (·.get)
+      let nonimplications := (rs.filter (!·.isTrue)).map (·.get)
+      for imp in implications do
+        println! Json.compress <| .mkObj [("lhs", imp.lhs), ("rhs", imp.rhs), ("isTrue", true)]
+      for imp in nonimplications do
+        println! Json.compress <| .mkObj [("lhs", imp.lhs), ("rhs", imp.rhs), ("isTrue", false)]
     else
       for edge in rs do
         if edge.isTrue then IO.println s!"{edge.lhs} → {edge.rhs}"
@@ -203,6 +210,7 @@ def extract_implications : Cmd := `[Cli|
     «conjecture»; "Include conjectures"
     closure; "Compute the transitive closure"
     json; "Output the data as JSON"
+    jsonl; "Output the data as JSONL"
     "only-implications"; "Only consider implications"
 
   ARGS:
