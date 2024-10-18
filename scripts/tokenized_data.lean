@@ -102,7 +102,7 @@ def Law.MagmaLaw.tokenizeWithName {α : Type} [ToString α] (law : Law.MagmaLaw 
 def runTokenizeEquations (_inp : Cli.Parsed) : IO UInt32 := do
   searchPathRef.set compile_time_search_path%
   CoreM.withImportModules #[`equational_theories] do 
-  for i in [:5000] do
+  for i in [:1000000] do
     let eqNm := s!"Equation{i}"
     let law ← try getEquationAsLaw eqNm catch _ => continue
     println! Json.compress <| law.tokenizeWithName eqNm
